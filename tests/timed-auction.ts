@@ -35,6 +35,9 @@ describe('timed-auction', () => {
 
     let collectionMintKeyPair: Keypair;
     let mintKeyPair: Keypair;
+    let auctionKeyPair: Keypair;
+    let startTime: number;
+    let endTime: number;
 
     it('Mint Collection', async () => {
         collectionMintKeyPair = Keypair.generate();
@@ -89,6 +92,48 @@ describe('timed-auction', () => {
             .rpc({ skipPreflight: true });
 
         console.log('NFT minted');
+        console.log('Transaction signature', transactionSignature);
+    });
+
+    it('Start auction', async () => {
+        auctionKeyPair = Keypair.generate();
+
+        const sellerNftAccountAddress = getAssociatedTokenAddressSync(
+            mintKeyPair.publicKey,
+            payer.publicKey
+        );
+
+        const auctionNftAccountAddress = getAssociatedTokenAddressSync(
+            mintKeyPair.publicKey,
+            auctionKeyPair.publicKey
+        );
+
+        const currentTimestamp = Math.floor(Date.now() / 1000);
+        startTime = currentTimestamp;
+        endTime = currentTimestamp + 3600;
+
+        const startPrice = new anchor.BN(1000000000);
+
+        const transactionSignature = await program.methods
+            .startAuction(
+                new anchor.BN(startTime),
+                new anchor.BN(endTime),
+                startPrice
+            )
+            .accounts({
+                auction: auctionKeyPair.publicKey,
+                seller: payer.publicKey,
+                sellerNftAccount: sellerNftAccountAddress,
+                auctionNftAccount: auctionNftAccountAddress,
+                mint: mintKeyPair.publicKey,
+            })
+            .signers([auctionKeyPair])
+            .rpc({ skipPreflight: true });
+
+        // const auctionAccount = await program.account.auction.fetch(auctionKeyPair.publicKey);
+        // console.log('Auction Account:', auctionAccount);
+
+        console.log('Auction started');
         console.log('Transaction signature', transactionSignature);
     });
 });
