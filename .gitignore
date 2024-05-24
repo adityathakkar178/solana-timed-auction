@@ -1,0 +1,33 @@
+# Node modules
+node_modules/
+
+# Yarn lock file
+yarn.lock
+
+# Anchor target directory
+target/
+
+# TypeScript build files
+lib/
+dist/
+
+# Solana Keypair files
+
+# Logs
+logs/
+*.log
+
+# Miscellaneous
+.DS_Store
+*.pem
+*.p12
+*.key
+*.cer
+*.crt
+*.pub
+
+# VS Code settings
+.vscode/
+
+# Environment variables
+.env
