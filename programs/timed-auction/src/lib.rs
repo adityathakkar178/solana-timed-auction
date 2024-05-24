@@ -175,6 +175,29 @@ pub mod timed_auction {
 
         Ok(())
     }
+
+    pub fn start_auction(
+        ctx: Context<StartAuction>,
+        start_time: i64,
+        end_time: i64,
+        starting_price: u64,
+    ) -> Result<()> {
+        msg!("Strating the auction");
+
+        let auction = &mut ctx.accounts.auction;
+        auction.mint = ctx.accounts.mint.key();
+        auction.seller = ctx.accounts.seller.key();
+        auction.highest_bid = starting_price;
+        auction.start_time = start_time;
+        auction.end_time = end_time;
+
+        let current_time = Clock::get()?.unix_timestamp;
+
+        auction.started = current_time >= auction.start_time;
+        auction.ended = current_time >= auction.end_time;
+
+        Ok(())
+    }
 }
 
 #[derive(Accounts)]
@@ -269,4 +292,33 @@ pub struct CreateCollection<'info> {
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
     pub rent: Sysvar<'info, Rent>,
+}
+
+#[derive(Accounts)]
+pub struct StartAuction<'info> {
+    #[account(
+        init,
+        payer = seller,
+        space = 8 + 32 + 32 + 32 + 8 + 8 + 8 + 1 + 1
+    )]
+    pub auction: Account<'info, Auction>,
+
+    #[account(mut)]
+    pub seller: Signer<'info>,
+
+    pub mint: Account<'info, Mint>,
+
+    pub system_program: Program<'info, System>,
+}
+
+#[account]
+pub struct Auction {
+    pub mint: Pubkey,
+    pub seller: Pubkey,
+    pub highest_bidder: Pubkey,
+    pub highest_bid: u64,
+    pub start_time: i64,
+    pub end_time: i64,
+    pub started: bool,
+    pub ended: bool,
 }
