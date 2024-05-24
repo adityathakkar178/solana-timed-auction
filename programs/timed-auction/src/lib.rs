@@ -17,6 +17,8 @@ declare_id!("GVJZWCRBZYNMcdbUaeBfgs5pyAJ6yNX97RQTfheaiHAc");
 
 #[program]
 pub mod timed_auction {
+    use anchor_spl::token;
+
     use super::*;
 
     pub fn mint_collection(
@@ -196,6 +198,18 @@ pub mod timed_auction {
         auction.started = current_time >= auction.start_time;
         auction.ended = current_time >= auction.end_time;
 
+        token::transfer(
+            CpiContext::new(
+                ctx.accounts.token_program.to_account_info(),
+                Transfer {
+                    from: ctx.accounts.seller_nft_account.to_account_info(),
+                    to: ctx.accounts.auction_nft_account.to_account_info(),
+                    authority: ctx.accounts.seller.to_account_info(),
+                },
+            ),
+            1,
+        )?;
+
         Ok(())
     }
 }
@@ -306,9 +320,27 @@ pub struct StartAuction<'info> {
     #[account(mut)]
     pub seller: Signer<'info>,
 
+    #[account(
+        mut,
+        associated_token::mint = mint,
+        associated_token::authority = seller,
+    )]
+    pub seller_nft_account: Account<'info, TokenAccount>,
+
+    #[account(
+        init,
+        payer = seller,
+        associated_token::mint = mint,
+        associated_token::authority = auction,
+    )]
+    pub auction_nft_account: Account<'info, TokenAccount>,
+
     pub mint: Account<'info, Mint>,
 
+    pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub rent: Sysvar<'info, Rent>,
 }
 
 #[account]
