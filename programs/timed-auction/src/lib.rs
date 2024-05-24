@@ -193,11 +193,6 @@ pub mod timed_auction {
         auction.start_time = start_time;
         auction.end_time = end_time;
 
-        let current_time = Clock::get()?.unix_timestamp;
-
-        auction.started = current_time >= auction.start_time;
-        auction.ended = current_time >= auction.end_time;
-
         token::transfer(
             CpiContext::new(
                 ctx.accounts.token_program.to_account_info(),
@@ -209,6 +204,39 @@ pub mod timed_auction {
             ),
             1,
         )?;
+
+        msg!("Auction has started");
+
+        Ok(())
+    }
+
+    pub fn place_bid(ctx: Context<PlaceBid>, bid_amount: u64) -> Result<()> {
+        msg!("Bidding stated");
+
+        let auction = &mut ctx.accounts.auction;
+        let current_time = Clock::get()?.unix_timestamp;
+
+        require!(current_time >= auction.start_time, AuctionError::AuctionNotStarted);
+        require!(current_time < auction.end_time, AuctionError::AuctionEnded);
+        require!(bid_amount > auction.highest_bid, AuctionError::BidTooLow);
+
+        auction.highest_bid = bid_amount;
+        auction.highest_bidder = ctx.accounts.bidder.key();
+
+
+        token::transfer(
+            CpiContext::new(
+                ctx.accounts.token_program.to_account_info(),
+                Transfer {
+                    from: ctx.accounts.bidder_token_account.to_account_info(),
+                    to: ctx.accounts.escrow_account.to_account_info(),
+                    authority: ctx.accounts.bidder.to_account_info(),
+                }
+            ),  
+            bid_amount
+        )?;
+
+        msg!("Bid has been palced");
 
         Ok(())
     }
@@ -308,6 +336,16 @@ pub struct CreateCollection<'info> {
     pub rent: Sysvar<'info, Rent>,
 }
 
+#[account]
+pub struct Auction {
+    pub mint: Pubkey,
+    pub seller: Pubkey,
+    pub highest_bidder: Pubkey,
+    pub highest_bid: u64,
+    pub start_time: i64,
+    pub end_time: i64,
+}
+
 #[derive(Accounts)]
 pub struct StartAuction<'info> {
     #[account(
@@ -343,14 +381,42 @@ pub struct StartAuction<'info> {
     pub rent: Sysvar<'info, Rent>,
 }
 
-#[account]
-pub struct Auction {
-    pub mint: Pubkey,
-    pub seller: Pubkey,
-    pub highest_bidder: Pubkey,
-    pub highest_bid: u64,
-    pub start_time: i64,
-    pub end_time: i64,
-    pub started: bool,
-    pub ended: bool,
+#[derive(Accounts)]
+pub struct PlaceBid<'info> {
+    #[account(mut)]
+    pub auction: Account<'info, Auction>,
+
+    #[account(mut)]
+    pub bidder: Signer<'info>,
+
+    #[account(
+        mut, 
+        associated_token::mint = mint,
+        associated_token::authority = bidder,
+    )]
+    pub bidder_token_account: Account<'info, TokenAccount>,
+
+    #[account (
+        mut,
+        seeds = [b"escrow", auction.key().as_ref()],
+        bump,
+    )]
+    pub escrow_account: Account<'info, TokenAccount>,
+
+    pub mint: Account<'info, Mint>,
+
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub rent: Sysvar<'info, Rent>,
+}
+
+#[error_code]
+pub enum AuctionError {
+    #[msg("Auction has not started yet.")]
+    AuctionNotStarted,
+    #[msg("Auction has already ended.")]
+    AuctionEnded,
+    #[msg("Bid amount is too low.")]
+    BidTooLow,
 }
