@@ -186,24 +186,25 @@ pub mod timed_auction {
     ) -> Result<()> {
         msg!("Strating the auction");
 
-        let auction = &mut ctx.accounts.auction;
-        auction.mint = ctx.accounts.mint.key();
-        auction.seller = ctx.accounts.seller.key();
-        auction.highest_bid = starting_price;
-        auction.start_time = start_time;
-        auction.end_time = end_time;
+        let pda_account = &mut ctx.accounts.pda_account;
 
         token::transfer(
             CpiContext::new(
                 ctx.accounts.token_program.to_account_info(),
                 Transfer {
-                    from: ctx.accounts.seller_nft_account.to_account_info(),
-                    to: ctx.accounts.auction_nft_account.to_account_info(),
+                    from: ctx.accounts.seller_token_account.to_account_info(),
+                    to: ctx.accounts.pda_token_account.to_account_info(),
                     authority: ctx.accounts.seller.to_account_info(),
                 },
             ),
             1,
         )?;
+
+        pda_account.mint = ctx.accounts.mint.key();
+        pda_account.seller = ctx.accounts.seller.key();
+        pda_account.highest_bid = starting_price;
+        pda_account.start_time = start_time;
+        pda_account.end_time = end_time;
 
         msg!("Auction has started");
 
@@ -211,32 +212,22 @@ pub mod timed_auction {
     }
 
     pub fn place_bid(ctx: Context<PlaceBid>, bid_amount: u64) -> Result<()> {
-        msg!("Bidding stated");
+        msg!("Bidding started");
 
-        let auction = &mut ctx.accounts.auction;
+        let auction = &mut ctx.accounts.pda_account;
         let current_time = Clock::get()?.unix_timestamp;
 
-        require!(current_time >= auction.start_time, AuctionError::AuctionNotStarted);
+        require!(
+            current_time >= auction.start_time,
+            AuctionError::AuctionNotStarted
+        );
         require!(current_time < auction.end_time, AuctionError::AuctionEnded);
         require!(bid_amount > auction.highest_bid, AuctionError::BidTooLow);
 
         auction.highest_bid = bid_amount;
         auction.highest_bidder = ctx.accounts.bidder.key();
 
-
-        token::transfer(
-            CpiContext::new(
-                ctx.accounts.token_program.to_account_info(),
-                Transfer {
-                    from: ctx.accounts.bidder_token_account.to_account_info(),
-                    to: ctx.accounts.escrow_account.to_account_info(),
-                    authority: ctx.accounts.bidder.to_account_info(),
-                }
-            ),  
-            bid_amount
-        )?;
-
-        msg!("Bid has been palced");
+        msg!("Bid has been placed");
 
         Ok(())
     }
@@ -348,67 +339,52 @@ pub struct Auction {
 
 #[derive(Accounts)]
 pub struct StartAuction<'info> {
-    #[account(
-        init,
-        payer = seller,
-        space = 8 + 32 + 32 + 32 + 8 + 8 + 8 + 1 + 1
-    )]
-    pub auction: Account<'info, Auction>,
-
     #[account(mut)]
     pub seller: Signer<'info>,
 
-    #[account(
-        mut,
-        associated_token::mint = mint,
-        associated_token::authority = seller,
-    )]
-    pub seller_nft_account: Account<'info, TokenAccount>,
+    #[account(mut)]
+    pub seller_token_account: Account<'info, TokenAccount>,
 
     #[account(
         init,
         payer = seller,
-        associated_token::mint = mint,
-        associated_token::authority = auction,
+        space = 8 + 32 + 32 + 32 + 8 + 8 + 32 + 32,
+        seeds = [b"sale", mint.key().as_ref()],
+        bump,
     )]
-    pub auction_nft_account: Account<'info, TokenAccount>,
+    pub pda_account: Account<'info, Auction>,
 
+    #[account(
+        init_if_needed,
+        payer = seller,
+        associated_token::mint = mint,
+        associated_token::authority = pda_signer,
+    )]
+    pub pda_token_account: Account<'info, TokenAccount>,
+
+    #[account(mut)]
     pub mint: Account<'info, Mint>,
 
+    /// CHECK: Validate address by deriving pda
+    #[account(
+        seeds = [b"sale", mint.key().as_ref()],
+        bump,
+    )]
+    pub pda_signer: AccountInfo<'info>,
+
+    pub associated_token_program: Program<'info, AssociatedToken>,
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
-    pub associated_token_program: Program<'info, AssociatedToken>,
     pub rent: Sysvar<'info, Rent>,
 }
 
 #[derive(Accounts)]
 pub struct PlaceBid<'info> {
     #[account(mut)]
-    pub auction: Account<'info, Auction>,
-
-    #[account(mut)]
     pub bidder: Signer<'info>,
 
-    #[account(
-        mut, 
-        associated_token::mint = mint,
-        associated_token::authority = bidder,
-    )]
-    pub bidder_token_account: Account<'info, TokenAccount>,
-
-    #[account (
-        mut,
-        seeds = [b"escrow", auction.key().as_ref()],
-        bump,
-    )]
-    pub escrow_account: Account<'info, TokenAccount>,
-
-    pub mint: Account<'info, Mint>,
-
-    pub token_program: Program<'info, Token>,
-    pub system_program: Program<'info, System>,
-    pub associated_token_program: Program<'info, AssociatedToken>,
-    pub rent: Sysvar<'info, Rent>,
+    #[account(mut)]
+    pub pda_account: Account<'info, Auction>,
 }
 
 #[error_code]

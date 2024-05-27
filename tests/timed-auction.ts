@@ -7,6 +7,7 @@ import {
     PublicKey,
     SystemProgram,
     Transaction,
+    sendAndConfirmTransaction,
 } from '@solana/web3.js';
 import {
     TOKEN_PROGRAM_ID,
@@ -18,7 +19,7 @@ import {
 describe('timed-auction', () => {
     const provider = anchor.AnchorProvider.env();
     anchor.setProvider(provider);
-    const payer = provider.wallet;
+    const payer = provider.wallet as anchor.Wallet;
     const program = anchor.workspace.TimedAuction;
 
     const collectionMetadata = {
@@ -33,9 +34,17 @@ describe('timed-auction', () => {
         uri: 'abcxyz',
     };
 
+    const bidderSecretKey = Uint8Array.from([
+        42, 165, 245, 159, 222, 186, 30, 59, 255, 159, 113, 47, 54, 124, 76,
+        163, 43, 196, 84, 5, 49, 170, 50, 11, 138, 41, 232, 148, 12, 220, 123,
+        134, 132, 67, 120, 119, 74, 89, 31, 50, 157, 152, 126, 40, 40, 244, 236,
+        21, 66, 18, 70, 7, 224, 123, 171, 16, 156, 248, 229, 104, 156, 119, 255,
+        160,
+    ]);
+    const bidderKeypair = Keypair.fromSecretKey(bidderSecretKey);
+
     let collectionMintKeyPair: Keypair;
     let mintKeyPair: Keypair;
-    let auctionKeyPair: Keypair;
     let startTime: number;
     let endTime: number;
 
@@ -96,16 +105,27 @@ describe('timed-auction', () => {
     });
 
     it('Start auction', async () => {
-        auctionKeyPair = Keypair.generate();
-
-        const sellerNftAccountAddress = getAssociatedTokenAddressSync(
+        const sellerTokenAccount = getAssociatedTokenAddressSync(
             mintKeyPair.publicKey,
             payer.publicKey
         );
 
-        const auctionNftAccountAddress = getAssociatedTokenAddressSync(
+        const [pdaAccount, bump] = PublicKey.findProgramAddressSync(
+            [Buffer.from('sale'), mintKeyPair.publicKey.toBuffer()],
+            program.programId
+        );
+
+        const pdaTokenAccountAddress = getAssociatedTokenAddressSync(
             mintKeyPair.publicKey,
-            auctionKeyPair.publicKey
+            pdaAccount,
+            true
+        );
+
+        const createPdaTokenAccountIx = createAssociatedTokenAccountInstruction(
+            payer.publicKey,
+            pdaTokenAccountAddress,
+            pdaAccount,
+            mintKeyPair.publicKey
         );
 
         const currentTimestamp = Math.floor(Date.now() / 1000);
@@ -121,19 +141,43 @@ describe('timed-auction', () => {
                 startPrice
             )
             .accounts({
-                auction: auctionKeyPair.publicKey,
                 seller: payer.publicKey,
-                sellerNftAccount: sellerNftAccountAddress,
-                auctionNftAccount: auctionNftAccountAddress,
+                sellerTokenAccount: sellerTokenAccount,
+                pdaAccount,
+                pdaTokenAccount: pdaTokenAccountAddress,
                 mint: mintKeyPair.publicKey,
+                pdaSigner: pdaAccount,
+                tokenProgram: TOKEN_PROGRAM_ID,
             })
-            .signers([auctionKeyPair])
+            .preInstructions([createPdaTokenAccountIx])
+            .signers([])
             .rpc({ skipPreflight: true });
-
-        // const auctionAccount = await program.account.auction.fetch(auctionKeyPair.publicKey);
-        // console.log('Auction Account:', auctionAccount);
 
         console.log('Auction started');
         console.log('Transaction signature', transactionSignature);
+    });
+
+    it('Place bid', async () => {
+        const [pdaAccount] = PublicKey.findProgramAddressSync(
+            [Buffer.from('sale'), mintKeyPair.publicKey.toBuffer()],
+            program.programId
+        );
+
+        const bidAmount = new anchor.BN(2000000000);
+
+        const transactionSignature = await program.methods
+            .placeBid(bidAmount)
+            .accounts({
+                bidder: bidderKeypair.publicKey,
+                pdaAccount: pdaAccount,
+            })
+            .signers([bidderKeypair])
+            .rpc({ skipPreflight: true });
+
+        console.log('Bid placed');
+        console.log('Transaction signature', transactionSignature);
+
+        // const auctionState = await program.account.auction.fetch(pdaAccount);
+        // console.log('Auction State:', auctionState);
     });
 });
