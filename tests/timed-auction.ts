@@ -130,7 +130,7 @@ describe('timed-auction', () => {
 
         const currentTimestamp = Math.floor(Date.now() / 1000);
         startTime = currentTimestamp;
-        endTime = currentTimestamp + 3600;
+        endTime = currentTimestamp + 60;
 
         const startPrice = new anchor.BN(1000000000);
 
@@ -179,5 +179,79 @@ describe('timed-auction', () => {
 
         // const auctionState = await program.account.auction.fetch(pdaAccount);
         // console.log('Auction State:', auctionState);
+    });
+
+    it('End auction', async () => {
+        await new Promise(resolve => setTimeout(resolve, 60000)); 
+
+        const sellerTokenAccount = getAssociatedTokenAddressSync(
+            mintKeyPair.publicKey,
+            payer.publicKey
+        );
+
+        const [pdaAccount, bump] = PublicKey.findProgramAddressSync(
+            [Buffer.from('sale'), mintKeyPair.publicKey.toBuffer()],
+            program.programId
+        );
+
+        const pdaTokenAccountAddress = getAssociatedTokenAddressSync(
+            mintKeyPair.publicKey,
+            pdaAccount,
+            true
+        );
+
+        const highestBidderTokenAccountAddress = getAssociatedTokenAddressSync(
+            mintKeyPair.publicKey,
+            bidderKeypair.publicKey
+        );
+
+        const pdaTokenAccountInfo = await getAccount(
+            provider.connection,
+            pdaTokenAccountAddress
+        ).catch(async () => {
+            const createPdaTokenAccountIx = createAssociatedTokenAccountInstruction(
+                payer.publicKey,
+                pdaTokenAccountAddress,
+                pdaAccount,
+                mintKeyPair.publicKey
+            );
+
+            const transaction = new Transaction().add(createPdaTokenAccountIx);
+            await sendAndConfirmTransaction(provider.connection, transaction, [payer.payer]);
+        });
+
+        const highestBidderTokenAccountInfo = await getAccount(
+            provider.connection,
+            highestBidderTokenAccountAddress
+        ).catch(async () => {
+            const createHighestBidderTokenAccountIx = createAssociatedTokenAccountInstruction(
+                payer.publicKey,
+                highestBidderTokenAccountAddress,
+                bidderKeypair.publicKey,
+                mintKeyPair.publicKey
+            );
+
+            const transaction = new Transaction().add(createHighestBidderTokenAccountIx);
+            await sendAndConfirmTransaction(provider.connection, transaction, [payer.payer]);
+        });
+
+        const transactionSignature = await program.methods
+            .endAuction()
+            .accounts({
+                seller: payer.publicKey,
+                highestBidder: bidderKeypair.publicKey,
+                pdaAccount: pdaAccount,
+                pdaTokenAccount: pdaTokenAccountAddress,
+                pdaSigner: pdaAccount,
+                highestBidderTokenAccount: highestBidderTokenAccountAddress,
+                mint: mintKeyPair.publicKey,
+                tokenProgram: TOKEN_PROGRAM_ID,
+                systemProgram: SystemProgram.programId,
+            })
+            .signers([payer.payer, bidderKeypair])
+            .rpc({ skipPreflight: true });
+
+        console.log('Auction ended');
+        console.log('Transaction signature', transactionSignature);
     });
 });

@@ -17,6 +17,7 @@ declare_id!("GVJZWCRBZYNMcdbUaeBfgs5pyAJ6yNX97RQTfheaiHAc");
 
 #[program]
 pub mod timed_auction {
+    use anchor_lang::system_program;
     use anchor_spl::token;
 
     use super::*;
@@ -231,6 +232,48 @@ pub mod timed_auction {
 
         Ok(())
     }
+
+    pub fn end_auction(ctx: Context<EndAuction>) -> Result<()> {
+        msg!("Ending the auction");
+
+        let auction = &mut ctx.accounts.pda_account;
+        let current_time = Clock::get()?.unix_timestamp;
+
+        require!(
+            current_time > auction.end_time,
+            AuctionError::AuctionNotEnded
+        );
+
+        let bump = &[ctx.bumps.pda_signer];
+        let binding = ctx.accounts.mint.key();
+        let signer_seeds = &[&[b"sale", binding.as_ref(), bump][..]];
+
+        token::transfer(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                Transfer {
+                    from: ctx.accounts.pda_token_account.to_account_info(),
+                    to: ctx.accounts.highest_bidder_token_account.to_account_info(),
+                    authority: ctx.accounts.pda_signer.to_account_info(),
+                },
+                signer_seeds,
+            ),
+            1,
+        )?;
+
+        system_program::transfer(
+            CpiContext::new(
+                ctx.accounts.system_program.to_account_info(),
+                system_program::Transfer {
+                    from: ctx.accounts.highest_bidder.to_account_info(),
+                    to: ctx.accounts.seller.to_account_info(),
+                },
+            ),
+            auction.highest_bid,
+        )?;
+
+        Ok(())
+    }
 }
 
 #[derive(Accounts)]
@@ -387,6 +430,39 @@ pub struct PlaceBid<'info> {
     pub pda_account: Account<'info, Auction>,
 }
 
+#[derive(Accounts)]
+pub struct EndAuction<'info> {
+    #[account(mut)]
+    pub seller: Signer<'info>,
+
+    #[account(mut)]
+    pub highest_bidder: Signer<'info>,
+
+    #[account(mut)]
+    pub pda_account: Account<'info, Auction>,
+
+    #[account(mut)]
+    pub pda_token_account: Account<'info, TokenAccount>,
+
+    /// CHECK: Validate address by deriving pda
+    #[account(
+        mut,
+        seeds = [b"sale", mint.key().as_ref()],
+        bump,
+    )]
+    pub pda_signer: AccountInfo<'info>,
+
+    #[account(mut)]
+    pub highest_bidder_token_account: Account<'info, TokenAccount>,
+
+    #[account(mut)]
+    pub mint: Account<'info, Mint>,
+
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+    pub rent: Sysvar<'info, Rent>,
+}
+
 #[error_code]
 pub enum AuctionError {
     #[msg("Auction has not started yet.")]
@@ -395,4 +471,6 @@ pub enum AuctionError {
     AuctionEnded,
     #[msg("Bid amount is too low.")]
     BidTooLow,
+    #[msg("Auction has not ended yet.")]
+    AuctionNotEnded,
 }
